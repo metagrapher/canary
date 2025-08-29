@@ -1,0 +1,32 @@
+# wrangler.toml
+name = "canary"
+main = "src/worker.js"
+compatibility_date = "2025-08-01"
+
+[[kv_namespaces]]
+binding = "TOKENS"
+id = "1da66de5d2b0465a9a1e5ed7d5955ab1"
+
+# Optional: keep KV for token metadata; we’ll write events to WAE.
+# If you want to keep KV events too, add another namespace:
+#[[kv_namespaces]]
+# binding = "EVENTS"
+# id = "<kv_events_id>"
+
+# Optional: R2 bucket for serving your own font binaries
+[[r2_buckets]]
+binding = "FONTS"
+bucket_name = "canary-fonts"
+
+# Workers Analytics Engine dataset for logs
+[[analytics_engine_datasets]]
+binding = "LOGS"
+dataset = "canary_events"
+
+#(Optional) webhook for instant pings(Slack / Discord / etc.)
+[vars]
+WEBHOOK_URL = ""
+FONT_UPSTREAM = "" # e.g. "https://example.com/fonts/Inter-roman.woff2"(used if R2 miss)
+# NEW: variables for querying WAE's SQL API
+CF_ACCOUNT_ID = "67082cb420b5c7404c347f2e6a5005f5"
+AE_DATASET    = "canary_events"   # must match the dataset above
