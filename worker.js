@@ -418,20 +418,20 @@ async function load(){
   const token = document.getElementById('tokenSelect').value.trim();
 
   // 1) Top tokens 24h
-  const rows1 = await q(`
+  const rows1 = await q(\`
     SELECT blob2 AS token_id, SUM(_sample_interval * double1) AS hits
     FROM ${ encodeURIComponent('canary_events') }
     WHERE timestamp >= NOW() - INTERVAL '1' DAY
     GROUP BY token_id
     ORDER BY hits DESC
     LIMIT 12;
-`.replace('canary_events', '${AE_DATASET_PLACEHOLDER}'));
+\`.replace('canary_events', '${AE_DATASET_PLACEHOLDER}'));
   const labels1 = rows1.map(r => r[0]);
   const data1   = rows1.map(r => r[1]);
   upsertChart('topTokens', { type:'bar', data:{ labels:labels1, datasets:[{ label:'Hits', data:data1 }] }, options:{ responsive:true, plugins:{legend:{display:false}} } });
 
   // 2) Series by type 6h, 5-min bins
-  const rows2 = await q(`
+  const rows2 = await q(\`
 SELECT
 intDiv(toUInt32(timestamp), 300) * 300 AS t,
   blob1 AS type,
@@ -440,7 +440,7 @@ intDiv(toUInt32(timestamp), 300) * 300 AS t,
     WHERE timestamp >= NOW() - INTERVAL '6' HOUR
     GROUP BY t, type
     ORDER BY t ASC, type ASC;
-`.replace('canary_events', '${AE_DATASET_PLACEHOLDER}'));
+\`.replace('canary_events', '${AE_DATASET_PLACEHOLDER}'));
   const ts = [...new Set(rows2.map(r => r[0]))].sort((a,b)=>a-b);
   const types = [...new Set(rows2.map(r => r[1]))];
   const series = types.map(tp => ts.map(t => {
@@ -456,14 +456,14 @@ intDiv(toUInt32(timestamp), 300) * 300 AS t,
 
   // 3) UA table 7d (optionally filtered by token)
   const where = token ? "AND blob2 = '"+token.replace(/'/g,"''")+"'": "";
-  const rows3 = await q(`
+  const rows3 = await q(\`
     SELECT blob10 AS user_agent, SUM(_sample_interval * double1) AS hits
     FROM ${ encodeURIComponent('canary_events') }
     WHERE timestamp >= NOW() - INTERVAL '7' DAY ${ where }
     GROUP BY user_agent
     ORDER BY hits DESC
     LIMIT 50;
-`.replace('canary_events', '${AE_DATASET_PLACEHOLDER}'));
+\`.replace('canary_events', '${AE_DATASET_PLACEHOLDER}'));
   const tbody = document.querySelector('#uaTable tbody');
   tbody.innerHTML = rows3.map(r => '<tr><td><code>'+ (r[0]||'') +'</code></td><td>'+ r[1] +'</td></tr>').join('');
 }
