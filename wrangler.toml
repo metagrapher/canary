@@ -3,6 +3,10 @@ name = "canary"
 main = "worker.js"
 compatibility_date = "2025-08-01"
 
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 [[kv_namespaces]]
 binding = "TOKENS"
 id = "1da66de5d2b0465a9a1e5ed7d5955ab1"
