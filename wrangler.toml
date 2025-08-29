@@ -1,6 +1,6 @@
 # wrangler.toml
 name = "canary"
-main = "src/worker.js"
+main = "worker.js"
 compatibility_date = "2025-08-01"
 
 [[kv_namespaces]]
