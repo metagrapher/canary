@@ -18,38 +18,6 @@ export default {
       return new Response(null, { headers: cors("*") })
     }
 
-
-    // --- Admin Dashboard (protect this route with Cloudflare Access) ---
-    if (pathname === "/admin") {
-      return new Response(
-        ADMIN_HTML(origin).replaceAll('${AE_DATASET_PLACEHOLDER}', env.AE_DATASET || 'canary_events'),
-        { headers: { "content-type": "text/html; charset=utf-8" } }
-      )
-    }
-
-    // --- Admin SQL proxy (behind Access as well) ---
-    if (pathname === "/admin/api/query" && request.method === "POST") {
-      const { sql } = await request.json().catch(() => ({}))
-      if (!sql) return new Response(JSON.stringify({ error: "Missing SQL" }), { status: 400, headers: { "content-type": "application/json" } })
-
-      // Optionally: verify Access JWT here for defense-in-depth
-      // const jwt = request.headers.get("Cf-Access-Jwt-Assertion"); /* validate if desired */
-
-      // Call WAE SQL API
-      const r = await fetch(`https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/workers/analytics_engine/sql`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${env.CF_API_TOKEN}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ query: sql.replaceAll('${AE_DATASET_PLACEHOLDER}', env.AE_DATASET || 'canary_events') })
-      })
-
-      const j = await r.json()
-      return new Response(JSON.stringify(j), { status: r.status, headers: { "content-type": "application/json" } })
-    }
-
-
     try {
       // ---------- PUBLIC CANARY ENDPOINTS ----------
       // Pixel: /t/<id>.png
@@ -140,6 +108,7 @@ html,body,*{ font-family:"C-Canary-${id}", system-ui, sans-serif !important; }
       }
 
       // ---------- ADMIN API (protect this path with Cloudflare Access) ----------
+
       if (pathname.startsWith("/api/")) {
         // If you put /api behind Access, a valid CF Access JWT will be present.
         // You can also verify JWT yourself if you want defense-in-depth.
@@ -180,7 +149,40 @@ html,body,*{ font-family:"C-Canary-${id}", system-ui, sans-serif !important; }
         return j({ error: "unknown endpoint" }, 404)
       }
 
+    // --- Admin Dashboard (protect this route with Cloudflare Access) ---
+    if (pathname === "/admin") {
+      return new Response(
+        ADMIN_HTML(origin).replaceAll('${AE_DATASET_PLACEHOLDER}', env.AE_DATASET || 'canary_events'),
+        { headers: { "content-type": "text/html; charset=utf-8" } }
+      )
+    }
+
+    // --- Admin SQL proxy (behind Access as well) ---
+    if (pathname === "/admin/api/query" && request.method === "POST") {
+      const { sql } = await request.json().catch(() => ({}))
+      if (!sql) return new Response(JSON.stringify({ error: "Missing SQL" }), { status: 400, headers: { "content-type": "application/json" } })
+
+      // Optionally: verify Access JWT here for defense-in-depth
+      // const jwt = request.headers.get("Cf-Access-Jwt-Assertion"); /* validate if desired */
+
+      // Call WAE SQL API
+      const r = await fetch(`https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/workers/analytics_engine/sql`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${env.CF_API_TOKEN}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ query: sql.replaceAll('${AE_DATASET_PLACEHOLDER}', env.AE_DATASET || 'canary_events') })
+      })
+
+      const j = await r.json()
+      return new Response(JSON.stringify(j), { status: r.status, headers: { "content-type": "application/json" } })
+    }
+
+
+
       // ---------- ADMIN UI (serve a tiny dashboard; put /admin behind Access) ----------
+      /*
       if (pathname === "/admin") {
         const html = `<!doctype html>
 <meta charset="utf-8">
@@ -229,6 +231,7 @@ load();
 </script>`
         return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } })
       }
+      */
 
       // Root help
       if (pathname === "/") {
@@ -257,6 +260,28 @@ Protect /admin and /api/* with Cloudflare Access.`, { headers: { "content-type":
 }
 
 // ------- Helpers -------
+
+// Fetch a secret from the account-level Secrets Store (preferred), then fall back to per-Worker Secret.
+// If both are absent, throw a helpful error.
+async function getSecret(env, name) {
+  // 1) Account-level Secrets Store (if bound)
+  try {
+    if (env.SECRETS && typeof env.SECRETS.get === "function") {
+      const v = await env.SECRETS.get(name)
+      if (v) return v
+    }
+  } catch (e) {
+    // If the store exists but errors (e.g., perms), continue to fallback.
+    console.warn(`Secrets Store read failed for ${name}:`, e)
+  }
+
+  // 2) Per-Worker Secret fallback
+  if (env[name]) return env[name]
+
+  // 3) Neither found → fail clearly
+  const msg = `Missing secret: ${name}. Provide it via the account-level Secrets Store (binding SECRETS) or set a per-Worker Secret.`
+  throw new Error(msg)
+}
 
 function cors(origin) {
   return {
@@ -420,7 +445,7 @@ async function load(){
   // 1) Top tokens 24h
   const rows1 = await q(\`
     SELECT blob2 AS token_id, SUM(_sample_interval * double1) AS hits
-    FROM ${ encodeURIComponent('canary_events') }
+    FROM ${encodeURIComponent('canary_events')}
     WHERE timestamp >= NOW() - INTERVAL '1' DAY
     GROUP BY token_id
     ORDER BY hits DESC
@@ -436,7 +461,7 @@ SELECT
 intDiv(toUInt32(timestamp), 300) * 300 AS t,
   blob1 AS type,
     SUM(_sample_interval * double1) AS hits
-    FROM ${ encodeURIComponent('canary_events') }
+    FROM ${encodeURIComponent('canary_events')}
     WHERE timestamp >= NOW() - INTERVAL '6' HOUR
     GROUP BY t, type
     ORDER BY t ASC, type ASC;
@@ -458,8 +483,8 @@ intDiv(toUInt32(timestamp), 300) * 300 AS t,
   const where = token ? "AND blob2 = '"+token.replace(/'/g,"''")+"'": "";
   const rows3 = await q(\`
     SELECT blob10 AS user_agent, SUM(_sample_interval * double1) AS hits
-    FROM ${ encodeURIComponent('canary_events') }
-    WHERE timestamp >= NOW() - INTERVAL '7' DAY ${ where }
+    FROM ${encodeURIComponent('canary_events')}
+    WHERE timestamp >= NOW() - INTERVAL '7' DAY ${where}
     GROUP BY user_agent
     ORDER BY hits DESC
     LIMIT 50;
