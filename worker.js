@@ -149,89 +149,6 @@ html,body,*{ font-family:"C-Canary-${id}", system-ui, sans-serif !important; }
         return j({ error: "unknown endpoint" }, 404)
       }
 
-    // --- Admin Dashboard (protect this route with Cloudflare Access) ---
-    if (pathname === "/admin") {
-      return new Response(
-        ADMIN_HTML(origin).replaceAll('${AE_DATASET_PLACEHOLDER}', env.AE_DATASET || 'canary_events'),
-        { headers: { "content-type": "text/html; charset=utf-8" } }
-      )
-    }
-
-    // --- Admin SQL proxy (behind Access as well) ---
-    if (pathname === "/admin/api/query" && request.method === "POST") {
-      const { sql } = await request.json().catch(() => ({}))
-      if (!sql) return new Response(JSON.stringify({ error: "Missing SQL" }), { status: 400, headers: { "content-type": "application/json" } })
-
-      // Optionally: verify Access JWT here for defense-in-depth
-      // const jwt = request.headers.get("Cf-Access-Jwt-Assertion"); /* validate if desired */
-
-      // Call WAE SQL API
-      const r = await fetch(`https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/workers/analytics_engine/sql`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${env.CF_API_TOKEN}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ query: sql.replaceAll('${AE_DATASET_PLACEHOLDER}', env.AE_DATASET || 'canary_events') })
-      })
-
-      const j = await r.json()
-      return new Response(JSON.stringify(j), { status: r.status, headers: { "content-type": "application/json" } })
-    }
-
-
-
-      // ---------- ADMIN UI (serve a tiny dashboard; put /admin behind Access) ----------
-      /*
-      if (pathname === "/admin") {
-        const html = `<!doctype html>
-<meta charset="utf-8">
-<title>DIY Canary – Admin</title>
-<style>
-  body{font:14px/1.4 system-ui, sans-serif; padding:24px; max-width:900px; margin:auto;}
-  code{background:#f4f4f4; padding:2px 4px; border-radius:4px}
-  .row{display:flex; gap:12px; margin:8px 0}
-  input,button,select{font:inherit; padding:8px}
-  table{border-collapse:collapse; width:100%}
-  th,td{border-bottom:1px solid #eee; padding:8px}
-</style>
-<h1>DIY Canary – Admin</h1>
-<div class="row">
-  <select id="type">
-    <option value="pixel">Pixel</option>
-    <option value="lure">Lure</option>
-    <option value="font">Font</option>
-  </select>
-  <input id="label" placeholder="Label (optional)">
-  <input id="decoy" placeholder="Decoy URL (lure only)">
-  <button id="create">Create</button>
-</div>
-<p>Tokens</p>
-<table id="t"></table>
-<script>
-async function api(path, opts){ const r = await fetch(path, {credentials:'include', ...opts}); return r.json(); }
-async function load(){
-  const data = await api('/api/tokens');
-  const rows = (data.tokens||[]).map(t =>
-    '<tr><td>'+t.id+'</td><td>'+t.type+'</td><td>'+t.label+'</td><td>'+
-    (t.type==='pixel'?'img: <code>'+location.origin+'/t/'+t.id+'.png</code>':
-     t.type==='lure'?'link: <code>'+location.origin+'/l/'+t.id+'</code>':
-     'css: <code>'+location.origin+'/css/'+t.id+'.css</code><br>font: <code>'+location.origin+'/f/'+t.id+'.woff2</code>')+
-    '</td></tr>').join('');
-  document.querySelector('#t').innerHTML = '<tr><th>ID</th><th>Type</th><th>Label</th><th>Endpoints</th></tr>'+rows;
-}
-document.querySelector('#create').onclick = async () => {
-  const type = document.querySelector('#type').value;
-  const label = document.querySelector('#label').value;
-  const decoy_url = document.querySelector('#decoy').value;
-  await api('/api/new', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({type, label, decoy_url})});
-  load();
-};
-load();
-</script>`
-        return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } })
-      }
-      */
 
       // Root help
       if (pathname === "/") {
@@ -357,8 +274,90 @@ async function verifyAccessJWT(request) {
 function j(obj, status = 200) { return new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json", ...cors("*") } }) }
 async function safeJson(req) { try { return await req.json() } catch { return {} } }
 
-// --- append to your existing worker.js (or replace your /admin handler) ---
 
+    // --- Admin Dashboard (protect this route with Cloudflare Access) ---
+    if (pathname === "/admin") {
+      return new Response(
+        ADMIN_HTML(origin).replaceAll('${AE_DATASET_PLACEHOLDER}', env.AE_DATASET || 'canary_events'),
+        { headers: { "content-type": "text/html; charset=utf-8" } }
+      )
+    }
+
+    // --- Admin SQL proxy (behind Access as well) ---
+    if (pathname === "/admin/api/query" && request.method === "POST") {
+      const { sql } = await request.json().catch(() => ({}))
+      if (!sql) return new Response(JSON.stringify({ error: "Missing SQL" }), { status: 400, headers: { "content-type": "application/json" } })
+
+      // Optionally: verify Access JWT here for defense-in-depth
+      // const jwt = request.headers.get("Cf-Access-Jwt-Assertion"); /* validate if desired */
+
+      // Call WAE SQL API
+      const r = await fetch(`https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/workers/analytics_engine/sql`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${env.CF_API_TOKEN}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ query: sql.replaceAll('${AE_DATASET_PLACEHOLDER}', env.AE_DATASET || 'canary_events') })
+      })
+
+      const j = await r.json()
+      return new Response(JSON.stringify(j), { status: r.status, headers: { "content-type": "application/json" } })
+    }
+
+
+
+      // ---------- ADMIN UI (serve a tiny dashboard; put /admin behind Access) ----------
+      /*
+      if (pathname === "/admin") {
+        const html = `<!doctype html>
+<meta charset="utf-8">
+<title>DIY Canary – Admin</title>
+<style>
+  body{font:14px/1.4 system-ui, sans-serif; padding:24px; max-width:900px; margin:auto;}
+  code{background:#f4f4f4; padding:2px 4px; border-radius:4px}
+  .row{display:flex; gap:12px; margin:8px 0}
+  input,button,select{font:inherit; padding:8px}
+  table{border-collapse:collapse; width:100%}
+  th,td{border-bottom:1px solid #eee; padding:8px}
+</style>
+<h1>DIY Canary – Admin</h1>
+<div class="row">
+  <select id="type">
+    <option value="pixel">Pixel</option>
+    <option value="lure">Lure</option>
+    <option value="font">Font</option>
+  </select>
+  <input id="label" placeholder="Label (optional)">
+  <input id="decoy" placeholder="Decoy URL (lure only)">
+  <button id="create">Create</button>
+</div>
+<p>Tokens</p>
+<table id="t"></table>
+<script>
+async function api(path, opts){ const r = await fetch(path, {credentials:'include', ...opts}); return r.json(); }
+async function load(){
+  const data = await api('/api/tokens');
+  const rows = (data.tokens||[]).map(t =>
+    '<tr><td>'+t.id+'</td><td>'+t.type+'</td><td>'+t.label+'</td><td>'+
+    (t.type==='pixel'?'img: <code>'+location.origin+'/t/'+t.id+'.png</code>':
+     t.type==='lure'?'link: <code>'+location.origin+'/l/'+t.id+'</code>':
+     'css: <code>'+location.origin+'/css/'+t.id+'.css</code><br>font: <code>'+location.origin+'/f/'+t.id+'.woff2</code>')+
+    '</td></tr>').join('');
+  document.querySelector('#t').innerHTML = '<tr><th>ID</th><th>Type</th><th>Label</th><th>Endpoints</th></tr>'+rows;
+}
+document.querySelector('#create').onclick = async () => {
+  const type = document.querySelector('#type').value;
+  const label = document.querySelector('#label').value;
+  const decoy_url = document.querySelector('#decoy').value;
+  await api('/api/new', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({type, label, decoy_url})});
+  load();
+};
+load();
+</script>`
+        return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } })
+      }
+      */
 // Minimal HTML dashboard with 3 panels + token picker
 const ADMIN_HTML = (origin) => `<!doctype html>
 <meta charset="utf-8">
