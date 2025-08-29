@@ -150,6 +150,37 @@ html,body,*{ font-family:"C-Canary-${id}", system-ui, sans-serif !important; }
       }
 
 
+      // --- Admin Dashboard (protect this route with Cloudflare Access) ---
+      if (pathname === "/admin") {
+        return new Response(
+          ADMIN_HTML(origin).replaceAll('${AE_DATASET_PLACEHOLDER}', env.AE_DATASET || 'canary_events'),
+          { headers: { "content-type": "text/html; charset=utf-8" } }
+        )
+      }
+
+      // --- Admin SQL proxy (behind Access as well) ---
+      if (pathname === "/admin/api/query" && request.method === "POST") {
+        const { sql } = await request.json().catch(() => ({}))
+        if (!sql) return new Response(JSON.stringify({ error: "Missing SQL" }), { status: 400, headers: { "content-type": "application/json" } })
+
+        // Optionally: verify Access JWT here for defense-in-depth
+        // const jwt = request.headers.get("Cf-Access-Jwt-Assertion"); /* validate if desired */
+
+        // Call WAE SQL API (use account-level Secrets Store for CF_API_TOKEN if bound)
+        const apiToken = await getSecret(env, 'CF_API_TOKEN')
+        const r = await fetch(`https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/workers/analytics_engine/sql`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${apiToken}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ query: sql.replaceAll('${AE_DATASET_PLACEHOLDER}', env.AE_DATASET || 'canary_events') })
+        })
+
+        const j = await r.json()
+        return new Response(JSON.stringify(j), { status: r.status, headers: { "content-type": "application/json" } })
+      }
+
       // Root help
       if (pathname === "/") {
         return new Response(
@@ -273,38 +304,6 @@ async function verifyAccessJWT(request) {
 
 function j(obj, status = 200) { return new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json", ...cors("*") } }) }
 async function safeJson(req) { try { return await req.json() } catch { return {} } }
-
-
-    // --- Admin Dashboard (protect this route with Cloudflare Access) ---
-    if (pathname === "/admin") {
-      return new Response(
-        ADMIN_HTML(origin).replaceAll('${AE_DATASET_PLACEHOLDER}', env.AE_DATASET || 'canary_events'),
-        { headers: { "content-type": "text/html; charset=utf-8" } }
-      )
-    }
-
-    // --- Admin SQL proxy (behind Access as well) ---
-    if (pathname === "/admin/api/query" && request.method === "POST") {
-      const { sql } = await request.json().catch(() => ({}))
-      if (!sql) return new Response(JSON.stringify({ error: "Missing SQL" }), { status: 400, headers: { "content-type": "application/json" } })
-
-      // Optionally: verify Access JWT here for defense-in-depth
-      // const jwt = request.headers.get("Cf-Access-Jwt-Assertion"); /* validate if desired */
-
-      // Call WAE SQL API
-      const r = await fetch(`https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/workers/analytics_engine/sql`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${env.CF_API_TOKEN}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ query: sql.replaceAll('${AE_DATASET_PLACEHOLDER}', env.AE_DATASET || 'canary_events') })
-      })
-
-      const j = await r.json()
-      return new Response(JSON.stringify(j), { status: r.status, headers: { "content-type": "application/json" } })
-    }
-
 
 
       // ---------- ADMIN UI (serve a tiny dashboard; put /admin behind Access) ----------
