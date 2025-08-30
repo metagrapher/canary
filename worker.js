@@ -8,10 +8,33 @@ const PNG_1x1 = Uint8Array.from([
   0x42, 0x60, 0x82
 ])
 
+// Minimal 1x1 GIF
+const GIF_1x1 = Uint8Array.from([
+  0x47,0x49,0x46,0x38,0x39,0x61,0x01,0x00,0x01,0x00,0x80,0x00,0x00,
+  0x00,0x00,0x00,0xFF,0xFF,0xFF,0x21,0xF9,0x04,0x01,0x00,0x00,0x00,
+  0x00,0x2C,0x00,0x00,0x00,0x00,0x01,0x00,0x01,0x00,0x00,0x02,0x02,
+  0x44,0x01,0x00,0x3B
+])
+
+// Tiny ICO (16x16, single color)
+const ICO_MINI = Uint8Array.from([
+  0x00,0x00,0x01,0x00,0x01,0x00,0x10,0x10,0x00,0x00,0x01,0x00,0x20,0x00,
+  0x68,0x01,0x00,0x00,0x16,0x00,0x00,0x00,
+  // DIB header (BITMAPINFOHEADER)
+  0x28,0x00,0x00,0x00,0x10,0x00,0x00,0x00,0x20,0x00,0x00,0x00,0x01,0x00,
+  0x20,0x00,0x00,0x00,0x00,0x00,0x40,0x01,0x00,0x00,0x13,0x0B,0x00,0x00,
+  0x13,0x0B,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+  // Pixel data (ARBG, 16x32 rows incl. AND mask space)
+  // Simple transparent icon with one colored pixel in top-left
+  0x00,0x00,0x00,0x00, /* ... repeated transparent ... */
+])
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url)
     const { pathname, searchParams, origin, host } = url
+
+    const ADMIN_BASE = (env.ADMIN_BASE && env.ADMIN_BASE.startsWith('/')) ? env.ADMIN_BASE : '/admin'
 
     // Basic CORS (useful for the CSS/Font endpoints in emails)
     if (request.method === "OPTIONS") {
@@ -107,13 +130,186 @@ html,body,*{ font-family:"C-Canary-${id}", system-ui, sans-serif !important; }
         })
       }
 
+      // --- Additional HEAD handlers for existing canaries ---
+      if (request.method === 'HEAD') {
+        let m
+        m = pathname.match(/^\/t\/([A-Za-z0-9_-]{8,64})(?:\.png)?$/)
+        if (m) {
+          const id = m[1]
+          const token = await ensureToken(env, id, "pixel")
+          ctx.waitUntil(writeLog(env, "pixel", id, request, url, { tokenKnown: !!token }))
+          return new Response(null, { headers: {
+            "Content-Type": "image/png",
+            "Content-Length": String(PNG_1x1.length),
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Cross-Origin-Resource-Policy": "cross-origin",
+            "Timing-Allow-Origin": "*",
+          } })
+        }
+        m = pathname.match(/^\/f\/([A-Za-z0-9_-]{8,64})\.woff2$/)
+        if (m) {
+          const id = m[1]
+          const token = await ensureToken(env, id, "font")
+          ctx.waitUntil(writeLog(env, "font", id, request, url, { tokenKnown: !!token }))
+          return new Response(null, { headers: {
+            "Content-Type": "font/woff2",
+            "Cache-Control": "no-store",
+            "Access-Control-Allow-Origin": "*",
+            "Timing-Allow-Origin": "*",
+            "Cross-Origin-Resource-Policy": "cross-origin",
+          } })
+        }
+        m = pathname.match(/^\/css\/([A-Za-z0-9_-]{8,64})\.css$/)
+        if (m) {
+          const id = m[1]
+          const token = await ensureToken(env, id, "font")
+          ctx.waitUntil(writeLog(env, "css-font", id, request, url, { tokenKnown: !!token }))
+          return new Response(null, { headers: {
+            "Content-Type": "text/css; charset=utf-8",
+            "Cache-Control": "no-store",
+            "Cross-Origin-Resource-Policy": "cross-origin",
+            ...cors("*"),
+          } })
+        }
+        m = pathname.match(/^\/l\/([A-Za-z0-9_-]{8,64})$/)
+        if (m) {
+          const id = m[1]
+          const token = await ensureToken(env, id, "lure")
+          ctx.waitUntil(writeLog(env, "lure", id, request, url, { tokenKnown: !!token }))
+          const s = await env.TOKENS.get(`token:${id}`)
+          const decoy = s ? (JSON.parse(s).decoy_url || "") : ""
+          if (decoy) return new Response(null, { status: 302, headers: new Headers({ Location: decoy }) })
+          return new Response(null, { status: 204 })
+        }
+      }
+
+      // --- New canary endpoints ---
+      // 1x1 GIF: /g/<id>.gif
+      {
+        const m = pathname.match(/^\/g\/([A-Za-z0-9_-]{8,64})\.gif$/)
+        if (m) {
+          const id = m[1]
+          const token = await ensureToken(env, id)
+          ctx.waitUntil(writeLog(env, "gif", id, request, url, { tokenKnown: !!token }))
+          const headers = {
+            "Content-Type": "image/gif",
+            "Content-Length": String(GIF_1x1.length),
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Cross-Origin-Resource-Policy": "cross-origin",
+            "Timing-Allow-Origin": "*",
+          }
+          if (request.method === 'HEAD') return new Response(null, { headers })
+          return new Response(GIF_1x1, { headers })
+        }
+      }
+
+      // Favicon: /ico/<id>.ico
+      {
+        const m = pathname.match(/^\/ico\/([A-Za-z0-9_-]{8,64})\.ico$/)
+        if (m) {
+          const id = m[1]
+          const token = await ensureToken(env, id)
+          ctx.waitUntil(writeLog(env, "ico", id, request, url, { tokenKnown: !!token }))
+          const headers = {
+            "Content-Type": "image/x-icon",
+            "Content-Length": String(PNG_1x1.length),
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Cross-Origin-Resource-Policy": "cross-origin",
+            "Timing-Allow-Origin": "*",
+          }
+          if (request.method === 'HEAD') return new Response(null, { headers })
+          return new Response(PNG_1x1, { headers })
+        }
+      }
+
+      // JS: /js/<id>.js
+      {
+        const m = pathname.match(/^\/js\/([A-Za-z0-9_-]{8,64})\.js$/)
+        if (m) {
+          const id = m[1]
+          const token = await ensureToken(env, id)
+          ctx.waitUntil(writeLog(env, "js", id, request, url, { tokenKnown: !!token }))
+          const headers = { "Content-Type": "application/javascript; charset=utf-8", "Cache-Control": "no-store", "Cross-Origin-Resource-Policy": "cross-origin", ...cors("*") }
+          if (request.method === 'HEAD') return new Response(null, { headers })
+          return new Response(`/* Canary JS ${id} */\n`, { headers })
+        }
+      }
+
+      // CSS: /s/<id>.css
+      {
+        const m = pathname.match(/^\/s\/([A-Za-z0-9_-]{8,64})\.css$/)
+        if (m) {
+          const id = m[1]
+          const token = await ensureToken(env, id)
+          ctx.waitUntil(writeLog(env, "css", id, request, url, { tokenKnown: !!token }))
+          const headers = { "Content-Type": "text/css; charset=utf-8", "Cache-Control": "no-store", "Cross-Origin-Resource-Policy": "cross-origin", ...cors("*") }
+          if (request.method === 'HEAD') return new Response(null, { headers })
+          return new Response(`/* Canary CSS ${id} */\n`, { headers })
+        }
+      }
+
+      // Basic-Auth: /auth/<id>
+      {
+        const m = pathname.match(/^\/auth\/([A-Za-z0-9_-]{8,64})$/)
+        if (m) {
+          const id = m[1]
+          const token = await ensureToken(env, id)
+          ctx.waitUntil(writeLog(env, "auth", id, request, url, { tokenKnown: !!token }))
+          return new Response("", { status: 401, headers: { "WWW-Authenticate": 'Basic realm="Canary", charset="UTF-8"', "Cache-Control": "no-store" } })
+        }
+      }
+
+      // OpenGraph/Unfurl: /o/<id>
+      {
+        const m = pathname.match(/^\/o\/([A-Za-z0-9_-]{8,64})$/)
+        if (m) {
+          const id = m[1]
+          const token = await ensureToken(env, id)
+          ctx.waitUntil(writeLog(env, "og", id, request, url, { tokenKnown: !!token }))
+          const img = `${origin}/t/${id}.png`
+          const html = `<!doctype html><meta charset="utf-8"><meta property="og:title" content="Preview"><meta property="og:description" content="Canary"><meta property="og:image" content="${img}"><meta name="twitter:card" content="summary_large_image"><title>Canary OG</title><link rel="icon" href="${origin}/ico/${id}.ico"><body><img src="${img}" alt="" width="1" height="1"></body>`
+          const headers = { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }
+          if (request.method === 'HEAD') return new Response(null, { headers })
+          return new Response(html, { headers })
+        }
+      }
+
+      // Calendar ICS: /cal/<id>.ics
+      {
+        const m = pathname.match(/^\/cal\/([A-Za-z0-9_-]{8,64})\.ics$/)
+        if (m) {
+          const id = m[1]
+          const token = await ensureToken(env, id)
+          ctx.waitUntil(writeLog(env, "ics", id, request, url, { tokenKnown: !!token }))
+          const dt = new Date()
+          const toIcs = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\..+/, 'Z')
+          const dtStart = toIcs(dt)
+          const dtEnd = toIcs(new Date(dt.getTime() + 15 * 60 * 1000))
+          const uid = `${id}@${url.hostname}`
+          const ics = [
+            'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Canary//EN', 'METHOD:PUBLISH', 'BEGIN:VEVENT',
+            `UID:${uid}`, `DTSTAMP:${dtStart}`, `DTSTART:${dtStart}`, `DTEND:${dtEnd}`, `SUMMARY:Meeting`, `URL:${origin}/l/${id}`,
+            'END:VEVENT', 'END:VCALENDAR'
+          ].join('\r\n') + '\r\n'
+          const headers = { "Content-Type": "text/calendar; charset=utf-8", "Cache-Control": "no-store" }
+          if (request.method === 'HEAD') return new Response(null, { headers })
+          return new Response(ics, { headers })
+        }
+      }
+
       // ---------- ADMIN API (protect this path with Cloudflare Access) ----------
 
       if (pathname.startsWith("/api/")) {
-        // If you put /api behind Access, a valid CF Access JWT will be present.
-        // You can also verify JWT yourself if you want defense-in-depth.
-        // See: Zero Trust “Validate JWTs” docs. :contentReference[oaicite:1]{index=1}
-        // await verifyAccessJWT(request); // Optional (see helper below)
+        // Protect API with Cloudflare Access JWT and scope by tenant
+        const claims = await verifyAccessJWT(request, env).catch(() => null)
+        if (!claims) return j({ error: "unauthorized" }, 401)
+        const tenantId = getTenantIdFromClaims(claims)
 
         if (request.method === "POST" && pathname === "/api/new") {
           const body = await safeJson(request)
@@ -128,6 +324,8 @@ html,body,*{ font-family:"C-Canary-${id}", system-ui, sans-serif !important; }
             label: body?.label || "",
             decoy_url: type === "lure" ? (body?.decoy_url || "") : "",
             created_at: new Date().toISOString(),
+            tenant_id: tenantId,
+            created_by: claims.email || "",
           }
           await env.TOKENS.put(`token:${id}`, JSON.stringify(token))
           return j({ token, endpoints: endpointsFor(origin, token) })
@@ -136,12 +334,15 @@ html,body,*{ font-family:"C-Canary-${id}", system-ui, sans-serif !important; }
         const mMeta = pathname.match(/^\/api\/token\/([A-Za-z0-9_-]{8,64})$/)
         if (request.method === "GET" && mMeta) {
           const token = await env.TOKENS.get(`token:${mMeta[1]}`).then(s => s && JSON.parse(s))
-          return token ? j({ token, endpoints: endpointsFor(origin, token) }) : j({ error: "not found" }, 404)
+          if (!token) return j({ error: "not found" }, 404)
+          if ((token.tenant_id || "") !== tenantId) return j({ error: "not found" }, 404)
+          return j({ token, endpoints: endpointsFor(origin, token) })
         }
 
         if (request.method === "GET" && pathname === "/api/tokens") {
           const list = await env.TOKENS.list({ prefix: "token:" })
-          const tokens = await Promise.all(list.keys.map(k => env.TOKENS.get(k.name).then(s => JSON.parse(s))))
+          const all = await Promise.all(list.keys.map(k => env.TOKENS.get(k.name).then(s => s && JSON.parse(s)).catch(() => null)))
+          const tokens = (all.filter(Boolean).filter(t => (t.tenant_id || "") === tenantId))
           tokens.sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
           return j({ tokens })
         }
@@ -151,15 +352,19 @@ html,body,*{ font-family:"C-Canary-${id}", system-ui, sans-serif !important; }
 
 
       // --- Admin Dashboard (protect this route with Cloudflare Access) ---
-      if (pathname === "/admin") {
+      if (pathname === ADMIN_BASE) {
+        const claims = await verifyAccessJWT(request, env).catch(() => null)
+        if (!claims) return new Response("unauthorized", { status: 401 })
         return new Response(
-          ADMIN_HTML(origin).replaceAll('${AE_DATASET_PLACEHOLDER}', env.AE_DATASET || 'canary_events'),
+          ADMIN_HTML(origin, ADMIN_BASE).replaceAll('${AE_DATASET_PLACEHOLDER}', env.AE_DATASET || 'canary_events'),
           { headers: { "content-type": "text/html; charset=utf-8" } }
         )
       }
 
       // --- Admin SQL proxy (behind Access as well) ---
-      if (pathname === "/admin/api/query" && request.method === "POST") {
+      if (pathname === `${ADMIN_BASE}/api/query` && request.method === "POST") {
+        const claims = await verifyAccessJWT(request, env).catch(() => null)
+        if (!claims) return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { "content-type": "application/json" } })
         const { sql } = await request.json().catch(() => ({}))
         if (!sql) return new Response(JSON.stringify({ error: "Missing SQL" }), { status: 400, headers: { "content-type": "application/json" } })
 
@@ -189,13 +394,23 @@ html,body,*{ font-family:"C-Canary-${id}", system-ui, sans-serif !important; }
 Pixel: GET ${origin}/t/<id>.png
 Lure : GET ${origin}/l/<id>
 Font : GET ${origin}/f/<id>.woff2   (and CSS at ${origin}/css/<id>.css)
+GIF  : GET ${origin}/g/<id>.gif
+Favicon: GET ${origin}/ico/<id>.ico
+JS   : GET ${origin}/js/<id>.js
+CSS  : GET ${origin}/s/<id>.css
+Auth : GET ${origin}/auth/<id> (401 Basic)
+OG   : GET ${origin}/o/<id>
+ICS  : GET ${origin}/cal/<id>.ics
 
 Admin:
   POST /api/new {"type":"pixel"|"lure"|"font", "label"?, "decoy_url"?}
   GET  /api/tokens
   GET  /api/token/<id>
 
-Protect /admin and /api/* with Cloudflare Access.`, { headers: { "content-type": "text/plain; charset=utf-8" } }
+Console: ${origin}${ADMIN_BASE} (protected by Cloudflare Access)
+SQL API: POST ${origin}${ADMIN_BASE}/api/query (protected)
+
+Protect ${ADMIN_BASE} and /api/* with Cloudflare Access.`, { headers: { "content-type": "text/plain; charset=utf-8" } }
         )
       }
 
@@ -291,15 +506,131 @@ async function writeLog(env, typ, id, request, url) {
   }
 }
 
-// Optional: strict validation of Cloudflare Access JWT for /admin and /api
-// You can rely on Access at the edge (recommended) OR verify the header yourself.
-// For DIY verification, follow Zero Trust docs (CF-Access-Jwt-Assertion, JWKS). :contentReference[oaicite:3]{index=3}
-async function verifyAccessJWT(request) {
-  const jwt = request.headers.get("Cf-Access-Jwt-Assertion")
-  if (!jwt) throw new Error("missing access token")
-  // Validate using jose + your account’s Access JWKS:
-  // https://<YOUR_SUBDOMAIN>.cloudflareaccess.com/cdn-cgi/access/certs
-  // (Implementation omitted here for brevity.)
+// --- Enhanced logging with method/search, bot tagging and IP hash ---
+async function hashIpWithSalt(ip, env) {
+  if (!ip) return ""
+  let salt = ""
+  try { salt = await getSecret(env, 'HASH_SALT') } catch { salt = "" }
+  const data = new TextEncoder().encode(`${salt}|${ip}`)
+  const digest = await crypto.subtle.digest("SHA-256", data)
+  const bytes = new Uint8Array(digest).slice(0, 10)
+  const b64 = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  return b64
+}
+
+function detectBot(request) {
+  const cf = request.cf || {}
+  const ua = (request.headers.get("User-Agent") || "").toLowerCase()
+  const bots = [
+    'slackbot', 'discordbot', 'twitterbot', 'facebookexternalhit', 'linkedinbot', 'skypeuripreview',
+    'whatsapp', 'telegrambot', 'google-structured-data-testing-tool', 'curl', 'wget', 'python-requests',
+    'bot ', ' headless', 'selenium', 'phantomjs', 'powershell'
+  ]
+  for (const k of bots) if (ua.includes(k)) return { bot: 1, reason: k }
+  const score = cf.botManagement && typeof cf.botManagement.score === 'number' ? cf.botManagement.score : undefined
+  if (typeof score === 'number' && score < 30) return { bot: 1, reason: 'cfbm_low_score' }
+  return { bot: 0, reason: '' }
+}
+
+// Override writeLog to enrich payload while keeping backward compatibility with callers
+async function writeLog(env, typ, id, request, url, opts = {}) {
+  const cf = request.cf || {}
+  const h = request.headers
+  const { bot, reason } = detectBot(request)
+  const ip = h.get("CF-Connecting-IP") || ""
+  const ipHash = await hashIpWithSalt(ip, env)
+  const tokenKnown = opts.tokenKnown ? 1 : 0
+  const blobs = [
+    typ,
+    id,
+    url.hostname,
+    url.pathname,
+    cf.country || "",
+    cf.city || "",
+    String(cf.asn || ""),
+    cf.asOrganization || "",
+    cf.colo || "",
+    (h.get("User-Agent") || "").slice(0, 512),
+    (h.get("Referer") || "").slice(0, 512),
+    (h.get("Accept-Language") || "").slice(0, 128),
+    request.method || "",
+    (url.search || "").slice(0, 256),
+    ipHash,
+    reason
+  ]
+  const doubles = [1, bot, tokenKnown]
+  const indexes = [id]
+
+  env.LOGS.writeDataPoint({ blobs, doubles, indexes })
+  if (env.WEBHOOK_URL) {
+    const text = `Canary ${typ.toUpperCase()} hit — ${id}\nIP:${ip || "?"} • ${cf.city || "?"},${cf.country || "?"} • ASN:${cf.asn || "?"}\nUA:${(h.get("User-Agent") || "").slice(0, 140)}\nPath:${url.pathname}${url.search}\nBot:${bot?"yes":"no"}`
+    fetch(env.WEBHOOK_URL, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, typ, id, ip_hash: ipHash, bot, bot_reason: reason }) }).catch(() => { })
+  }
+}
+
+// Cloudflare Access JWT verification using JWKS (RS256/ES256)
+let JWKS_CACHE = { exp: 0, keys: [] }
+async function verifyAccessJWT(request, env) {
+  const token = request.headers.get('Cf-Access-Jwt-Assertion')
+  if (!token) throw new Error('missing access token')
+  const [hB64, pB64, sB64] = token.split('.')
+  if (!hB64 || !pB64 || !sB64) throw new Error('malformed JWT')
+  const dec = (b64) => {
+    b64 = b64.replace(/-/g, '+').replace(/_/g, '/')
+    const pad = b64.length % 4 === 2 ? '==': b64.length % 4 === 3 ? '=' : ''
+    return new Uint8Array([...atob(b64 + pad)].map(c => c.charCodeAt(0)))
+  }
+  const toJSON = (bytes) => JSON.parse(new TextDecoder().decode(bytes))
+  const header = toJSON(dec(hB64))
+  const payload = toJSON(dec(pB64))
+  // Basic claims
+  const team = (env.CF_ACCESS_TEAM_DOMAIN || '').trim() // e.g. your-team.cloudflareaccess.com
+  const audSecret = await getSecret(env, 'CANARY_AUD').catch(() => '')
+  if (!team || !audSecret) throw new Error('missing CF_ACCESS_TEAM_DOMAIN or CANARY_AUD')
+  const now = Math.floor(Date.now()/1000)
+  if (typeof payload.exp === 'number' && now > payload.exp) throw new Error('jwt expired')
+  if (typeof payload.nbf === 'number' && now < payload.nbf) throw new Error('jwt not yet valid')
+  const expectedIss = `https://${team}`
+  if ((payload.iss || '').replace(/\/?$/, '') !== expectedIss.replace(/\/?$/, '')) throw new Error('issuer mismatch')
+  const reqAuds = Array.isArray(payload.aud) ? payload.aud : [payload.aud]
+  const allowedAuds = audSecret.split(',').map(s => s.trim()).filter(Boolean)
+  if (!reqAuds.some(a => allowedAuds.includes(a))) throw new Error('audience mismatch')
+  // Fetch JWKS (with short cache)
+  const nowMs = Date.now()
+  if (nowMs > JWKS_CACHE.exp) {
+    const jwksUrl = `https://${team}/cdn-cgi/access/certs`
+    const r = await fetch(jwksUrl, { cf: { cacheTtl: 300, cacheEverything: true } })
+    if (!r.ok) throw new Error('jwks fetch failed')
+    const { keys } = await r.json()
+    JWKS_CACHE = { keys: keys || [], exp: nowMs + 5*60*1000 }
+  }
+  const jwk = JWKS_CACHE.keys.find(k => k.kid === header.kid)
+  if (!jwk) throw new Error('key not found')
+  // Signature verify
+  const algo = header.alg
+  const data = new TextEncoder().encode(`${hB64}.${pB64}`)
+  const sig = dec(sB64)
+  let key, ok = false
+  if (algo === 'RS256') {
+    key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify'])
+    ok = await crypto.subtle.verify({ name: 'RSASSA-PKCS1-v1_5' }, key, sig, data)
+  } else if (algo === 'ES256') {
+    key = await crypto.subtle.importKey('jwk', jwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify'])
+    ok = await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, sig, data)
+  } else {
+    throw new Error('unsupported alg')
+  }
+  if (!ok) throw new Error('signature invalid')
+  return payload
+}
+
+function getTenantIdFromClaims(claims) {
+  // Start simple: per-user tenant based on email; fallback to sub
+  const email = (claims.email || '').toLowerCase()
+  if (email) return `user:${email}`
+  const sub = (claims.sub || '').toLowerCase()
+  if (sub) return `sub:${sub}`
+  return 'anonymous'
 }
 
 function j(obj, status = 200) { return new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json", ...cors("*") } }) }
@@ -358,7 +689,7 @@ load();
       }
       */
 // Minimal HTML dashboard with 3 panels + token picker
-const ADMIN_HTML = (origin) => `<!doctype html>
+const ADMIN_HTML = (origin, base) => `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DIY Canary — Dashboard</title>
@@ -417,7 +748,7 @@ const ADMIN_HTML = (origin) => `<!doctype html>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <script>
 async function q(sql){
-  const r = await fetch('/admin/api/query', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({sql}) });
+  const r = await fetch('${base}/api/query', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({sql}) });
   const j = await r.json();
   if(!r.ok) throw new Error(j.errors?.[0]?.message || j.error || 'Query failed');
   return j.result?.rows || [];

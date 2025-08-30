@@ -34,3 +34,8 @@ FONT_UPSTREAM = "" # e.g. "https://example.com/fonts/Inter-roman.woff2"(used if 
 # NEW: variables for querying WAE's SQL API
 CF_ACCOUNT_ID = "67082cb420b5c7404c347f2e6a5005f5"
 AE_DATASET    = "canary_events"   # must match the dataset above
+# Cloudflare Access (JWT verification)
+CF_ACCESS_TEAM_DOMAIN = "metafaith.cloudflareaccess.com" # e.g. your-team.cloudflareaccess.com (without protocol)
+ADMIN_BASE = "/canary"    # obfuscated admin base path instead of /admin (e.g. "/c-3f5d9a")
+
+routes = [{ pattern = "ornithology.metagrapher.io"}]
