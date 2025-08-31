@@ -476,35 +476,7 @@ function endpointsFor(origin, token) {
   return { css, font: `${origin}/f/${id}.woff2`, html: `<link rel="stylesheet" href="${css}">` }
 }
 
-// Write a single event into Workers Analytics Engine
-async function writeLog(env, typ, id, request, url) {
-  const cf = request.cf || {}
-  const h = request.headers
-  // NOTE: WAE expects ordered arrays — keep this consistent. :contentReference[oaicite:2]{index=2}
-  const blobs = [
-    typ,                   // blob1: type ("pixel"|"lure"|"font")
-    id,                    // blob2: token_id
-    url.hostname,          // blob3: host hit
-    url.pathname,          // blob4: path
-    cf.country || "",      // blob5
-    cf.city || "",         // blob6
-    String(cf.asn || ""),  // blob7
-    cf.asOrganization || "", // blob8
-    cf.colo || "",         // blob9
-    (h.get("User-Agent") || "").slice(0, 512),   // blob10
-    (h.get("Referer") || "").slice(0, 512),      // blob11
-    (h.get("Accept-Language") || "").slice(0, 128) // blob12
-  ]
-  const doubles = [1]     // double1: count=1 (for SUMs)
-  const indexes = [id]    // index (sampling key) → token_id
 
-  env.LOGS.writeDataPoint({ blobs, doubles, indexes }) // fire-and-forget
-  // (Optional) webhook summary
-  if (env.WEBHOOK_URL) {
-    const text = `Canary ${typ.toUpperCase()} hit – ${id}\nIP:${h.get("CF-Connecting-IP") || "?"} • ${cf.city || "?"},${cf.country || "?"} • ASN:${cf.asn || "?"}\nUA:${(h.get("User-Agent") || "").slice(0, 140)}\nPath:${url.pathname}`
-    fetch(env.WEBHOOK_URL, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) }).catch(() => { })
-  }
-}
 
 // --- Enhanced logging with method/search, bot tagging and IP hash ---
 async function hashIpWithSalt(ip, env) {
